@@ -1,3 +1,10 @@
+# Ignore images folder
+mnist_images/
+fashion_mnist_images/
+
+# Models folder
+models/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
