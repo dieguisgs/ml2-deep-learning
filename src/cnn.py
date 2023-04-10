@@ -5,8 +5,11 @@ import os
 import tensorflow as tf
 from sys import platform
 from keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+import pandas as pd
+import time
+import seaborn as sns
 
-from results import Results
+from src.results import Results
 
 if platform == "darwin":
     # Fix macOS error "OMP: Error #15: Initializing libiomp5.dylib, but found libiomp5.dylib already initialized."
@@ -18,8 +21,8 @@ class CNN:
 
         Examples:
             1. Training and evaluating the CNN. Optionally, save the model.
-                cnn = CNN()
-                cnn.train(training_dir, validation_dir, base_model='ResNet50')
+                cnn = CNN(base_model='ResNet50', model_name="ResNet50_prueba1)
+                cnn.train(training_dir, validation_dir)
                 cnn.predict(validation_dir)
                 cnn.save(filename)
 
@@ -27,20 +30,23 @@ class CNN:
                 cnn = CNN()
                 cnn.load(filename)
                 cnn.predict(test_dir)
-
     """
 
-    def __init__(self,base_model: str, unfreezed_convolutional_layers: int = 0, include_top:bool = False):
+    def __init__(self,base_model: str = None, model_name:str = None, unfreezed_convolutional_layers: int = 0, include_top:bool = False):
         """CNN transfer learning class initializer."""
+        self._base_model = base_model
         self._model_name = ""
+        self._name_model_name = model_name
         self._model = None
         self._target_size = None
         self._preprocessing_function = None
         self.add_ = 0
         self._initialize_base_model(base_model, unfreezed_convolutional_layers, include_top=include_top)
+        self._unfreezed_convolutional_layers = unfreezed_convolutional_layers
+        
 
     def train(self, training_dir: str, validation_dir: str, epochs: int = 1, training_batch_size: int = 32, validation_batch_size: int = 32,
-              learning_rate: float = 1e-4):
+              learning_rate: float = 1e-4,early_stopping_patience: int = 3, reduce_lr_patience: int = None, reduce_lr_factor: float = None):
         """Use transfer learning or fine-tuning to train a base network to classify new categories.
 
         Args:
@@ -56,6 +62,8 @@ class CNN:
             learning_rate: Optimizer learning rate.
 
         """
+        assert self._base_model is not None, "The base model must be specified"
+        assert self._name_model_name is not None, "The model name must be specified"
 
         # Configure loading and pre-processing/data augmentation functions
         print('\n\nReading training and validation data...')
@@ -117,8 +125,10 @@ class CNN:
         #Con pocas epocas de entrenamiento no hace falta hacer un early stopping pero si tengo muchas igual si.
 
         # To launch TensorBoard type the following in a Terminal window: tensorboard --logdir /path/to/log/folder
+        if not os.path.exists(os.path.abspath(f"./src/cnns/{self._name_model_name}/logs")):
+            os.makedirs(os.path.abspath(f"./src/cnns/{self._name_model_name}/logs"))
         tensorboard_callback = tf.keras.callbacks.TensorBoard(
-            log_dir=os.path.abspath("./logs"), histogram_freq=0,
+            log_dir=os.path.abspath(f"./src/cnns/{self._name_model_name}/logs"), histogram_freq=0,
             write_graph=True, write_grads=False,
             write_images=False, embeddings_freq=0,
             embeddings_layer_names=None, embeddings_metadata=None,
@@ -127,30 +137,54 @@ class CNN:
 
         earlystopping = EarlyStopping(monitor='val_loss',
                                              min_delta = 0, 
-                                             patience = 3, #Si no mejora en 3 epocas para
+                                             patience = early_stopping_patience, #Si no mejora en 3 epocas para
                                              verbose = 0,
                                              restore_best_weights = True #devuelve la primera epoca a partir de la cual no mejoro en el entrenamiento
         )
+        if reduce_lr_patience is not None and reduce_lr_factor is not None:
+            reduce_on_plateau = ReduceLROnPlateau(monitor='val_loss', factor=reduce_lr_factor, patience=reduce_lr_patience, verbose=0, min_delta=0.0001)
+            callbacks = [tensorboard_callback, earlystopping,reduce_on_plateau]
+        else:
+            callbacks = [tensorboard_callback, earlystopping]
+        if reduce_lr_factor is None and reduce_lr_patience is  None:
+            self._reduce_lr = None
+        else:
+            self._reduce_lr = {'monitor': reduce_on_plateau.monitor, 'patience': reduce_on_plateau.patience, 'factor': reduce_on_plateau.factor, 'min_delta': reduce_on_plateau.min_delta}
+        self._earlystopping = {'monitor': earlystopping.monitor , 'patience': earlystopping.patience, 'min_delta': earlystopping.min_delta, 'restore_best_weights': earlystopping.restore_best_weights}
+        self._batch_size = {"Train": training_batch_size, "Validation": validation_batch_size}
+        self._learning_rate = learning_rate
+        self._epochs = epochs
+
+    
 
         #Con tensorboard se guardan logs de los entrenamientos.
 
-        callbacks = [tensorboard_callback, earlystopping]
-
         # Train the network
         print("\n\nTraining CNN...")
-
+        #time the history of the training
+        start = time.time()
         history = self._model.fit(
             training_generator,
             epochs=epochs,
-            steps_per_epoch=len(training_generator),
             validation_data=validation_generator,
-            validation_steps=len(validation_generator),
             callbacks=callbacks
         )
+        end = time.time()
+        self._training_time = end - start
+        self._history = history
+
+
+        self._dropout_rates = []
+        self._activation_denses = []
+        for layer in self._model.layers:
+            if isinstance(layer, tf.keras.layers.Dropout):
+                self._dropout_rates.append(layer.rate)
+            if isinstance(layer, tf.keras.layers.Dense):
+                self._activation_denses.append((str(layer.activation).split(' ')[1], layer.output.shape[1]))
 
         # Plot model training history
         if epochs > 1:
-            self._plot_training(history)
+            self._fig=self._plot_training(history)
 
     def predict(self, test_dir: str, dataset_name: str = "", save: bool = True):
         """Evaluates a new set of images using the trained CNN.
@@ -178,7 +212,7 @@ class CNN:
         predicted_labels = np.argmax(predictions, axis=1).ravel().tolist()
 
         # Format results and compute classification statistics
-        results = Results(test_generator.class_indices, dataset_name=dataset_name)
+        results = Results(test_generator.class_indices, dataset_name=dataset_name, model_name=self._name_model_name)
         accuracy, confusion_matrix, classification = results.compute(test_generator.filenames, test_generator.classes,
                                                                      predicted_labels)
         # Display and save results
@@ -186,8 +220,24 @@ class CNN:
 
         if save:
             results.save(confusion_matrix, classification, predictions)
+            if os.path.isfile(f"./src/cnns/{self._name_model_name}/validation_results.xlsx") and os.path.isfile(f"./src/cnns/{self._name_model_name}/training_results.xlsx"):
+                accuracy_val = self._accuracy_excel(f"./src/cnns/{self._name_model_name}/validation_results.xlsx")
+                accuracy_train = self._accuracy_excel(f"./src/cnns/{self._name_model_name}/training_results.xlsx")
+                if not os.path.isfile('src/cnns/overall_results.xlsx'):
+                    overall_df = pd.DataFrame(columns=['Model', 'Base Model', 'Accuracy Train', 'Accuracy Val', 'Nº Last Layers', 'Last Layers', 'DropOut', 'Dense Activations', 'Epochs', 'Learning Rate', 'EarlyStopping',
+                                                        'Batch', 'Nº Params', 'Unfreezed CNN Layers', 'Elapsed Time'])
+                    overall_df.to_excel('src/cnns/overall_results.xlsx', index=False)
+                overall_df = pd.read_excel('src/cnns/overall_results.xlsx')
+                new_row = pd.DataFrame({'Model': self._name_model_name, "Base Model": self._base_model, 'Accuracy Train': accuracy_train,
+                                        'Accuracy Val': accuracy_val, 'Nº Last Layers': len(self._model.layers), 'Last Layers': str([str(type(layer)).split(".")[-1][:-2] for layer in self._model.layers]),
+                                        "DropOut": str(self._dropout_rates), "Dense Activations": str(self._activation_denses), 'Epochs': self._epochs, "Learning Rate": self._learning_rate, 'EarlyStopping': str(self._earlystopping),
+                                        "Batch": str(self._batch_size), "Nº Params": self._model.count_params(), "Unfreezed CNN Layers": self._unfreezed_convolutional_layers,
+                                        "Elapsed Time": self._training_time}, index=[0])
+                overall_df = pd.concat([overall_df, new_row], ignore_index=True)
+                overall_df.to_excel('src/cnns/overall_results.xlsx', index=False)
 
-    def load(self, filename: str):
+    
+    def load(self,filename: str):
         """Loads a trained CNN model and the corresponding preprocessing information.
 
         Args:
@@ -195,10 +245,10 @@ class CNN:
 
         """
         # Load Keras model
-        self._model = tf.keras.models.load_model(filename + '.h5')
+        self._model = tf.keras.models.load_model(f'src/cnns/{filename}/'+filename + '.h5')
 
         # Load base model information
-        with open(filename + '.json') as f:
+        with open(f'src/cnns/{filename}/'+filename + '.json') as f:
             self._model_name = json.load(f)
 
         self._initialize_attributes()
@@ -223,19 +273,29 @@ class CNN:
         self.add_ += 1
         self._model = self._model2
 
-    def save(self, filename: str):
+    def save(self,):
         """Saves the model to an .h5 file and the model name to a .json file.
 
         Args:
            filename: Relative path to the file without the extension.
 
         """
+        #if  folder src/cnn_results/ does not exist, create it
+        if not os.path.exists(f'src/cnns/{self._name_model_name}'):
+            os.makedirs(f'src/cnns/{self._name_model_name}')
+
+
         # Save Keras model
-        self._model.save(filename + '.h5')
+        self._model.save(f'src/cnns/{self._name_model_name}/'+self._name_model_name + '.h5')
 
         # Save base model information
-        with open(filename + '.json', 'w', encoding='utf-8') as f:
+        with open(f'src/cnns/{self._name_model_name}/'+self._name_model_name + '.json', 'w', encoding='utf-8') as f:
             json.dump(self._model_name, f, ensure_ascii=False, indent=4, sort_keys=True)
+
+        #save the image of _plot_training
+
+        self._fig.savefig(f'src/cnns/{self._name_model_name}/'+self._name_model_name + '.png')
+
 
     def _initialize_base_model(self, base_model: str, unfreezed_convolutional_layers: int, include_top: bool = True,
                                pooling: str = 'avg'):
@@ -365,24 +425,27 @@ class CNN:
         validation_accuracy = history.history['val_accuracy']
         loss = history.history['loss']
         val_loss = history.history['val_loss']
-        epochs = range(len(training_accuracy))
+        sns.set_style("darkgrid")
 
-        # Accuracy
-        plt.figure()
-        plt.plot(epochs, training_accuracy, 'r', label='Training accuracy')
-        plt.plot(epochs, validation_accuracy, 'b', label='Validation accuracy')
-        plt.title('Training and validation accuracy')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy')
-        plt.legend()
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        axs[0].set_ylabel('Loss', fontsize=16)
+        axs[0].plot(loss, label='Training Loss', color='tab:blue', linewidth=1)
+        axs[0].plot(val_loss, label='Validation Loss', color='tab:orange', linewidth=1)
+        axs[0].legend(loc='upper right')
 
-        # Loss
-        plt.figure()
-        plt.plot(epochs, loss, 'r', label='Training loss')
-        plt.plot(epochs, val_loss, 'b', label='Validation loss')
-        plt.title('Training and validation loss')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.legend()
+        axs[1].set_ylabel('Accuracy', fontsize=16)
+        axs[1].plot(training_accuracy, label='Training Accuracy', color='tab:blue', linewidth=1)
+        axs[1].plot(validation_accuracy, label='Validation Accuracy', color='tab:orange', linewidth=1)
+        axs[1].legend(loc='lower right')
+        fig.suptitle('CNN Loss/Accuracy', fontsize=16)
+        return fig
 
-        plt.show()
+    def _accuracy_excel(self,excel_file_name:str):
+        confusion_matrix = pd.read_excel(excel_file_name, index_col=0)
+
+        correct_predictions = confusion_matrix.values.diagonal().sum()
+        total_predictions = confusion_matrix.values.sum()
+
+        accuracy = correct_predictions / total_predictions
+
+        return  accuracy

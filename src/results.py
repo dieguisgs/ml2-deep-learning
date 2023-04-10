@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 class Results:
     """Class to compute classification results."""
 
-    def __init__(self, labels: Dict[str, int], dataset_name: str = ""):
+    def __init__(self, labels: Dict[str, int], dataset_name: str = "",model_name: str = ""):
         """Results initializer.
 
         Args:
@@ -17,6 +17,7 @@ class Results:
         """
         self._labels = labels
         self._dataset_name = dataset_name
+        self._model_name = model_name
 
     def compute(self, dataset: List[str], true_labels: List[int], predicted_labels: List[int]) -> \
             Tuple[float, np.ndarray, List[Tuple[str, str, str]]]:
@@ -97,10 +98,15 @@ class Results:
         probabilities_df = pd.DataFrame(predictions, columns=labels)
         classification_df = pd.concat([classification_df, probabilities_df], axis=1)
 
-        # Write to Excel
+        # Write to Excel in folder src/cnn_results
         workbook = self._dataset_name.lower().replace(" ", "_") + '_' if self._dataset_name else ""
-        workbook += "results.xlsx"
+        workbook += f"results.xlsx"
+        folder_path = f"src/cnns/{self._model_name}"
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        file_path = os.path.join(folder_path, workbook)
 
-        with pd.ExcelWriter(workbook) as writer:
+        with pd.ExcelWriter(file_path) as writer:
             confusion_df.to_excel(writer, sheet_name='Confusion matrix', index_label='KNOWN/PREDICTED')
             classification_df.to_excel(writer, sheet_name='Classification results', index=False, float_format = '%.2f', freeze_panes=(1, 0))
+
