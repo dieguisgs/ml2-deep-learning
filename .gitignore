@@ -115,6 +115,7 @@ celerybeat.pid
 .venv
 env/
 venv/
+venv_bow/
 ENV/
 env.bak/
 venv.bak/
@@ -136,3 +137,41 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# dataset
+dataset/
+src/dataset/
+logs/
+src/cnns/DenseNet121_1/
+src/cnns/DenseNet169_1/
+src/cnns/DenseNet201_1/
+src/cnns/InceptionResNetV2_1/
+src/cnns/InceptionResNetV2_2/
+src/cnns/InceptionResNetV2_3/
+src/cnns/InceptionResNetV2_4/
+src/cnns/InceptionResNetV2_5/
+src/cnns/InceptionResNetV2_6/
+src/cnns/InceptionV3_1/
+src/cnns/MobileNetV2_1/
+src/cnns/MobileNet_1/
+src/cnns/MobileNet_10/
+src/cnns/MobileNet_11/
+src/cnns/MobileNet_12/
+src/cnns/MobileNet_2/
+src/cnns/MobileNet_3/
+src/cnns/MobileNet_4/
+src/cnns/MobileNet_5/
+src/cnns/MobileNet_6/
+src/cnns/MobileNet_7/
+src/cnns/MobileNet_8/
+src/cnns/MobileNet_9/
+src/cnns/NASNetMobile_1/
+src/cnns/NASNetMobile_2/
+src/cnns/resnet50_1/
+src/cnns/vgg19_1/
+src/cnns/xception_1/
+src/cnns/xception_2/
+src/cnns/xception_3/
+src/cnns/xception_4/
+src/cnns/xception_5/
+src/cnns/~$overall_results.xlsx
