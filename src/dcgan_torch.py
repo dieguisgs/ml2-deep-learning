@@ -17,9 +17,7 @@ from tqdm import trange
 import torch
 import torchvision
 from torch import nn, optim
-from torch.nn import functional as F
 from torchvision import datasets, transforms
-from torchsummary import summary
 
 # Set the device to GPU if available
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -65,7 +63,7 @@ class DCGAN_torch:
         # BUILD DISCRIMINATOR
         # ===========================================================
         self._discriminator = self._build_discriminator()
-        self._loss = nn.BCEWithLogitsLoss()
+        self._loss = nn.BCELoss()
         self._discriminator_optimizer = optim.Adam(self._discriminator.parameters(), lr=0.0002, betas=(0.5, 0.999))
 
         # ===========================================================
@@ -79,7 +77,7 @@ class DCGAN_torch:
         self._discriminator.train()
 
 
-    def train(self, epochs: int = 1000, batch_size: int = 128, save_interval: int = 50, images_dir: str = "images/mnist", models_dir: str = "models"):
+    def train(self, epochs: int = 1000, batch_size: int = 128, save_interval: int = 50, images_dir: str = "images/pytorch_mnist", models_dir: str = "models"):
         """Train the discriminator and the generator.
 
         Saves both models upon completion.
@@ -98,11 +96,10 @@ class DCGAN_torch:
             Directory where the trained models will be saved.
         """
         trainloader = torch.utils.data.DataLoader(self._train_dataset, batch_size=batch_size, shuffle=True)
-        # train_iter = iter(trainloader)
 
-        # Adversarial loss ground truths
-        # valid = torch.ones(batch_size, dtype=int)
-        # fake = torch.zeros(batch_size, dtype=int)
+        # LABELS
+        real_label = 1
+        fake_label = 0        
 
         print("\n\nTraining...")
 
@@ -112,35 +109,50 @@ class DCGAN_torch:
         # Training loop
         # Epochs
         for epoch in tqdm(range(epochs)):
-            d_total_loss = 0
-            g_total_loss = 0
-            # gen_out = 0
-            # Batches
-            for batch, labels in trainloader:
+            # Select a batch of images
+            for i, data in enumerate(trainloader, 0):
+
                 # ==================================
                 #  TRAIN DISCRIMINATOR
                 # ==================================
-                # REAL IMAGES
-                # Select a random batch of images
+
+                # Set correct images classified to 0
+                # d_correct = 0
+
+                # 1. REAL IMAGES
                 # Set discriminator gradients to zero in every batch
                 self._discriminator_optimizer.zero_grad()
-                batch = batch.to(device)
+                batch = data[0].to(device)
+                # Create tensor of lenght batch_size with all values equal to real_label
+                label = torch.full((batch_size,), real_label, device=device)
                 # Get discriminator output for real images
-                d_real_output = self._discriminator(batch.float())
+                d_real_output = self._discriminator(batch).view(-1, 1).squeeze(1)
+                # Calculate discriminator loss for real images
+                d_real_error = self._loss(d_real_output, label.to(torch.float32))
+                # Calculate discrimnator correct predictions
+                # d_correct += (torch.round(d_real_output) == label.to(torch.float32)).float().sum()
+                # Calculate gradients for real images
+                d_real_error.backward()
 
-                # FAKE IMAGES
-                noise = torch.rand(batch_size, self._latent_dim)*2 - 1
-                noise = noise.to(device)
-                # Use detach to avoid training the generator
-                fake_images = self._generator(noise.float().unsqueeze(2).unsqueeze(3)).detach()
-                d_fake_output = self._discriminator(fake_images.float())
+                # 2. FAKE IMAGES
+                # Generate fake images
+                noise = torch.randn(batch_size, self._latent_dim, 1, 1, device=device)
+                fake_images = self._generator(noise)
+                # Create tensor of lenght batch_size with all values equal to fake_label
+                label.fill_(fake_label)
+                # Get discriminator output for fake images
+                d_fake_output = self._discriminator(fake_images.detach()).view(-1, 1).squeeze(1)
+                # Calculate discriminator loss for fake images
+                d_fake_error = self._loss(d_fake_output, label.to(torch.float32))
+                # Calculate discrimnator correct predictions
+                # d_correct += (torch.round(d_fake_output) == label.to(torch.float32)).float().sum()
+                # Calculate gradients for fake images
+                d_fake_error.backward()
 
-                # DISCRIMINATOR LOSS
-                d_loss = self._discriminator_loss(d_real_out=d_real_output, d_fake_out=d_fake_output)
-                d_total_loss += d_loss
-
-                # Backpropagate discriminator loss
-                d_loss.backward()
+                # Get total discriminator loss
+                d_total_error = d_real_error + d_fake_error
+                # Get discriminator accuracy
+                # d_accuracy = d_correct / (2 * batch_size)
                 # Update discriminator weights
                 self._discriminator_optimizer.step()
 
@@ -149,36 +161,33 @@ class DCGAN_torch:
                 # ==================================
                 # Set generator gradients to zero in every batch
                 self._generator_optimizer.zero_grad()
-
-                # Generate fake images
-                g_output = self._generator(noise.float().unsqueeze(2).unsqueeze(3))
+                # Create tensor of lenght batch_size with all values equal to real_label
+                label.fill_(real_label)
                 # Get discriminator output for fake images
-                combined_output = self._discriminator(g_output.float())
-
-                g_loss = self._generator_loss(combined_model_out=combined_output)
-                g_total_loss += g_loss
-
-                # Backpropagate generator loss
-                g_loss.backward()
+                d_fake_output = self._discriminator(fake_images).view(-1, 1).squeeze(1)
+                # Calculate generator loss
+                g_error = self._loss(d_fake_output, label.to(torch.float32))
+                # Calculate gradients for generator
+                g_error.backward()
                 # Update generator weights
                 self._generator_optimizer.step()
 
-            pbar.set_description("[Discriminator loss: %.4f] - [Generator loss: %.4f]"
-                                 % (d_total_loss.item(), g_total_loss.item()))
+                pbar.set_description("[Discriminator loss: %.4f] - [Generator loss: %.4f]" 
+                                     % (d_total_error.item(), g_error.item()))
+
+                # If at save interval => save generated image samples
+                if save_interval > 0 and i % save_interval == 0:
+                    self._generate_samples(epoch, i, images_dir)
+
             pbar.update(1)
             time.sleep(0.01)  # Prevents a race condition between tqdm and print statements.
 
-            # If at save interval => save generated image samples
-            if save_interval > 0 and epoch % save_interval == 0:
-                self._generate_samples(epoch, images_dir)
-
         # Save final models
-        if not os.path.isdir('models'):
-            os.makedirs('models', exist_ok=True)
+        os.makedirs('models', exist_ok=True)
 
         # Save both models
-        torch.save(self._generator, os.path.join(models_dir, f'pytorch_{self._dataset}_generator.h5'))
-        torch.save(self._discriminator, os.path.join(models_dir, f'pytorch_{self._dataset}_discriminator.h5'))
+        torch.save(self._generator, os.path.join(models_dir, f'pytorch_{self._dataset}_generator.pt'))
+        torch.save(self._discriminator, os.path.join(models_dir, f'pytorch_{self._dataset}_discriminator.pt'))
 
 
     @staticmethod
@@ -300,7 +309,7 @@ class DCGAN_torch:
         return model
     
 
-    def _generate_samples(self, epoch: int,  images_dir: str, figure_size: Tuple[int, int] = (10, 10)):
+    def _generate_samples(self, epoch: int,  iteration: int, images_dir: str, figure_size: Tuple[int, int] = (10, 10)):
         """
         Saves a .png figure composed of several generated images arranged as specified in the figure_size parameter.
 
@@ -308,6 +317,8 @@ class DCGAN_torch:
         -------
         epoch: int
             Training epoch number. Used to name the saved image.
+        iteration: int
+            Training iteration number. Used to name the saved image.
         images_dir: str
             Directory where to save the generated images.
         figure_size: Tuple[int, int]
@@ -318,9 +329,8 @@ class DCGAN_torch:
         
         # Generate images
         rows, cols = figure_size
-        noise = torch.randn((rows*cols, self._latent_dim))
-        self._generator.eval()
-        generated_images = self._generator(noise.float().unsqueeze(2).unsqueeze(3)).detach()
+        noise = torch.randn(rows*cols, self._latent_dim, 1, 1, device=device)
+        generated_images = self._generator(noise).detach()
         generated_images = 0.5 * generated_images + 0.5  # Rescale images to [0, 1]
 
         # Build and save a single figure with all the generated images side-by-side
@@ -332,53 +342,11 @@ class DCGAN_torch:
             plt.axis('off')
 
         plt.tight_layout()
-        plt.savefig(os.path.join(images_dir, "epoch_%04d.png" % epoch))
+
+        # Format epoch and iteration numbers to have 4 digits, so images are sorted correctly
+        epoch_str = "0"*(4-len(str(epoch))) + str(epoch)
+        iteration_str = "0"*(4-len(str(iteration))) + str(iteration)
+
+        # Save image
+        plt.savefig(os.path.join(images_dir, f"epoch_{epoch_str}_{iteration_str}.png"))
         plt.close()
-
-
-    def _discriminator_loss(self, d_real_out: torch.Tensor, d_fake_out: torch.Tensor) -> torch.Tensor:
-        """
-        Computes the discriminator loss.
-
-        Args:
-        -------
-        d_real_out: torch.Tensor
-            Output of the discriminator for real images.
-        d_fake_out: torch.Tensor
-            Output of the discriminator for fake images.
-
-        Returns:
-        -------
-        total_loss: torch.Tensor
-            Total discriminator loss.
-        """
-        # DISCRIMINATOR LOSS FOR REAL IMAGES
-        real_label = torch.ones(d_real_out.size()[0], 1).to(device)
-        real_loss = self._loss(d_real_out.squeeze(), real_label.squeeze())
-
-        # DISCRIMINATOR LOSS FOR FAKE IMAGES
-        fake_label = torch.zeros(d_fake_out.size()[0], 1).to(device)
-        fake_loss = self._loss(d_fake_out.squeeze(), fake_label.squeeze())
-
-        # TOTAL DISCRIMINATOR LOSS
-        total_loss = (real_loss + fake_loss)
-        return total_loss
-    
-    
-    def _generator_loss(self, combined_model_out: torch.Tensor) -> torch.Tensor:
-        """
-        Computes the generator loss.
-
-        Args:
-        -------
-        combined_model_out: torch.Tensor
-            Output of the combined model (generator + discriminator).
-        
-        Returns:
-        -------
-        gen_loss: torch.Tensor
-            Generator loss.
-        """
-        label = torch.ones(combined_model_out.size()[0], 1).to(device)
-        gen_loss = self._loss(combined_model_out.squeeze(), label.squeeze())
-        return gen_loss
