@@ -46,7 +46,8 @@ class CNN:
         
 
     def train(self, training_dir: str, validation_dir: str, epochs: int = 1, training_batch_size: int = 32, validation_batch_size: int = 32,
-              learning_rate: float = 1e-4,early_stopping_patience: int = 3, reduce_lr_patience: int = None, reduce_lr_factor: float = None):
+              learning_rate: float = 1e-4,early_stopping_patience: int = 3, reduce_lr_patience: int = None, reduce_lr_factor: float = None, 
+              zoom_range=0.2, rotation_range=30, shear_range=0.2, brightness_range=None, horizontal_flip=True, width_shift_range=0.2, height_shift_range=0.2):
         """Use transfer learning or fine-tuning to train a base network to classify new categories.
 
         Args:
@@ -69,12 +70,13 @@ class CNN:
         print('\n\nReading training and validation data...')
         training_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
             preprocessing_function=self._preprocessing_function,
-            rotation_range=30,
-            width_shift_range=0.2,
-            height_shift_range=0.2,
-            shear_range=0.2,
-            zoom_range=0.2,
-            horizontal_flip=True,  # Randomly flip half of the images horizontally
+            rotation_range=rotation_range,
+            width_shift_range=width_shift_range,
+            height_shift_range=height_shift_range,
+            shear_range=shear_range,
+            zoom_range=zoom_range,
+            horizontal_flip=horizontal_flip,
+            brightness_range = brightness_range,  # Randomly flip half of the images horizontally
             fill_mode='nearest'  # Strategy used for filling in new pixels that appear after transforming images
         )
         #Aumenta los datos haciendo transformaciones que tengan sentido, por ejemplo imagenes con ligeras horientacones. Estirar, girar, zoom, etc
@@ -154,6 +156,11 @@ class CNN:
         self._batch_size = {"Train": training_batch_size, "Validation": validation_batch_size}
         self._learning_rate = learning_rate
         self._epochs = epochs
+        #a dict of this zoom_range, rotation_range, shear_range, brightness_range, horizontal_flip, width_shift_range, height_shift_range
+
+        self._data_augmentation = {"zoom_range": zoom_range, "rotation_range": rotation_range, "shear_range": shear_range, "brightness_range": brightness_range, "horizontal_flip": horizontal_flip,
+                               "width_shift_range": width_shift_range, "height_shift_range": height_shift_range}
+    
 
     
 
@@ -225,13 +232,13 @@ class CNN:
                 accuracy_train = self._accuracy_excel(f"./src/cnns/{self._name_model_name}/training_results.xlsx")
                 if not os.path.isfile('src/cnns/overall_results.xlsx'):
                     overall_df = pd.DataFrame(columns=['Model', 'Base Model', 'Accuracy Train', 'Accuracy Val', 'Nº Last Layers', 'Last Layers', 'DropOut', 'Dense Activations', 'Epochs', 'Learning Rate', 'EarlyStopping',
-                                                        'Batch', 'Nº Params', 'Unfreezed CNN Layers', 'Elapsed Time'])
+                                                        'Batch', "DataAug", 'Nº Params', 'Unfreezed CNN Layers', 'Elapsed Time'])
                     overall_df.to_excel('src/cnns/overall_results.xlsx', index=False)
                 overall_df = pd.read_excel('src/cnns/overall_results.xlsx')
                 new_row = pd.DataFrame({'Model': self._name_model_name, "Base Model": self._base_model, 'Accuracy Train': accuracy_train,
                                         'Accuracy Val': accuracy_val, 'Nº Last Layers': len(self._model.layers), 'Last Layers': str([str(type(layer)).split(".")[-1][:-2] for layer in self._model.layers]),
                                         "DropOut": str(self._dropout_rates), "Dense Activations": str(self._activation_denses), 'Epochs': self._epochs, "Learning Rate": self._learning_rate, 'EarlyStopping': str(self._earlystopping),
-                                        "Batch": str(self._batch_size), "Nº Params": self._model.count_params(), "Unfreezed CNN Layers": self._unfreezed_convolutional_layers,
+                                        "Batch": str(self._batch_size), 'DataAug':str(self._data_augmentation), "Nº Params": self._model.count_params(), "Unfreezed CNN Layers": self._unfreezed_convolutional_layers,
                                         "Elapsed Time": self._training_time}, index=[0])
                 overall_df = pd.concat([overall_df, new_row], ignore_index=True)
                 overall_df.to_excel('src/cnns/overall_results.xlsx', index=False)
