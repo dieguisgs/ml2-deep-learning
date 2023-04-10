@@ -78,7 +78,7 @@ class DCGAN:
         # Compile the combined model
         self._combined.compile(loss='binary_crossentropy', optimizer=optimizer)
 
-    def train(self, epochs: int = 1000, batch_size: int = 128, save_interval: int = 50):
+    def train(self, epochs: int = 1000, batch_size: int = 128, save_interval: int = 50, images_dir: str = "images/tf_mnist", models_dir: str = "models"):
         """Train the discriminator and the generator.
 
         Saves both models upon completion.
@@ -130,14 +130,13 @@ class DCGAN:
 
             # Save generated image samples
             if save_interval > 0 and epoch % save_interval == 0:
-                self._generate_samples(epoch)
+                self._generate_samples(epoch, images_dir)
 
         # Save final models
-        if not os.path.isdir('models'):
-            os.mkdir('models')
+        os.makedirs('models', exist_ok=True)
 
-        self._generator.save('models/generator.h5')
-        self._discriminator.save('models/discriminator.h5')
+        self._generator.save(os.path.join(models_dir, f"{images_dir.split('/')[-1]}_generator.h5"))
+        self._discriminator.save(os.path.join(models_dir, f"{images_dir.split('/')[-1]}_discriminator.h5"))
 
     @staticmethod
     def _load_dataset(dataset: str):
@@ -246,7 +245,7 @@ class DCGAN:
 
         return tf.keras.Model(inputs=noise, outputs=image)
 
-    def _generate_samples(self, epoch: int, figure_size: Tuple[int, int] = (10, 10)):
+    def _generate_samples(self, epoch: int, images_dir: str, figure_size: Tuple[int, int] = (10, 10)):
         """Saves a .png figure composed of several generated images arranged as specified in the figure_size parameter.
 
         Args:
@@ -255,8 +254,8 @@ class DCGAN:
 
         """
         # Create folder if it does not exist
-        if not os.path.isdir('images'):
-            os.mkdir('images')
+        os.makedirs(images_dir, exist_ok=True)
+        # Create folder if it does not exist
 
         # Generate row * cols images
         rows, cols = figure_size
@@ -273,7 +272,7 @@ class DCGAN:
             plt.axis('off')
 
         plt.tight_layout()
-        plt.savefig("images/epoch_%04d.png" % epoch)
+        plt.savefig(os.path.join(images_dir, "epoch_%04d.png" % epoch))
         plt.close()
 
 
