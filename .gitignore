@@ -174,4 +174,12 @@ src/cnns/xception_2/
 src/cnns/xception_3/
 src/cnns/xception_4/
 src/cnns/xception_5/
+src/cnns/InceptionResNetV2_11/
+src/cnns/InceptionResNetV2_13/
+src/cnns/InceptionResNetV2_14/
+src/cnns/InceptionResNetV2_15/
+src/cnns/InceptionResNetV2_16/
+src/cnns/InceptionResNetV2_7/
+src/cnns/InceptionResNetV2_8/
+src/cnns/InceptionResNetV2_9/
 src/cnns/~$overall_results.xlsx
