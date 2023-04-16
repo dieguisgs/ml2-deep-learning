@@ -141,6 +141,8 @@ dmypy.json
 # dataset
 dataset/
 src/dataset/
+
+# Models
 logs/
 src/cnns/DenseNet121_1/
 src/cnns/DenseNet169_1/
@@ -186,3 +188,6 @@ src/cnns/InceptionResNetV2_7/
 src/cnns/InceptionResNetV2_8/
 src/cnns/InceptionResNetV2_9/
 src/cnns/~$overall_results.xlsx
+
+# Pytorch Lightning Logs
+lightning_logs/
